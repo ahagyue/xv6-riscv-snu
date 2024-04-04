@@ -16,6 +16,36 @@ main()
     printf("\n");
     printf("xv6 kernel is booting\n");
     printf("\n");
+
+    // pa1 start
+    printf("SNUOS2024\n");
+    
+    int i = 1;
+    char student_id[11] = "2020-17164";
+    char name[11] = "KangMingyu";
+    for(; i <= 10; i++) {
+      // write partial student id and name
+      printf("%s", student_id + 10-i);
+      printf("\n");
+      printf("%s",  name + 10-i);
+      printf("\n");
+      
+      // wait for a short time
+      int k =0;
+      while(k!=200000000) k++;
+      
+      // erase two line
+      if (i != 10) {
+        printf("\033[1A");
+        printf("\033[K");
+        printf("\033[1A");
+        printf("\033[K");
+        printf("\033[0G");
+      }
+    }
+    printf("\n");
+    // pa1 end
+
     kinit();         // physical page allocator
     kvminit();       // create kernel page table
     kvminithart();   // turn on paging
