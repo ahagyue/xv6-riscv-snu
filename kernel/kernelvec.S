@@ -93,15 +93,30 @@ kernelvec:
 .globl timervec
 .align 4
 timervec:
-        # start.c has set up the memory that mscratch points to:
-        # scratch[0,8,16] : register save area.
-        # scratch[24] : address of CLINT's MTIMECMP register.
-        # scratch[32] : desired interval between interrupts.
-        
         csrrw a0, mscratch, a0
         sd a1, 0(a0)
         sd a2, 8(a0)
         sd a3, 16(a0)
+
+        #call machinetrap
+        csrr a1, mcause
+        li a2, 9
+        bne a1, a2, L0
+
+        ld a3, 16(a0)
+        ld a2, 8(a0)
+        ld a1, 0(a0)
+
+        csrrw a0, mscratch, a0
+        #mret
+        #call machinetrap
+        #rdtime a0
+        mret
+L0:
+        # start.c has set up the memory that mscratch points to:
+        # scratch[0,8,16] : register save area.
+        # scratch[24] : address of CLINT's MTIMECMP register.
+        # scratch[32] : desired interval between interrupts.
 
         # schedule the next timer interrupt
         # by adding interval to mtimecmp.
@@ -120,5 +135,12 @@ timervec:
         ld a2, 8(a0)
         ld a1, 0(a0)
         csrrw a0, mscratch, a0
+
+        mret
+
+.global machinevec
+.align 4
+machinevec:
+        rdtime a0
 
         mret

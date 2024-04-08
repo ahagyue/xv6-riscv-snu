@@ -161,6 +161,13 @@ kerneltrap()
 }
 
 void
+machinetrap() {
+  if (r_mcause() == 9) {
+    printf("called machinetrap\n");
+  }
+}
+
+void
 clockintr()
 {
   acquire(&tickslock);

@@ -50,6 +50,7 @@ struct {
   uint r;  // Read index
   uint w;  // Write index
   uint e;  // Edit index
+  uint c;  // Counter
 } cons;
 
 //
@@ -126,6 +127,11 @@ consoleread(int user_dst, uint64 dst, int n)
   return target - n;
 }
 
+int
+getconscnt() {
+  return cons.c;
+}
+
 //
 // the console input interrupt handler.
 // uartintr() calls this for input character.
@@ -136,6 +142,9 @@ void
 consoleintr(int c)
 {
   acquire(&cons.lock);
+
+  // count keyboard interrupt
+  cons.c++;
 
   switch(c){
   case C('P'):  // Print process list.

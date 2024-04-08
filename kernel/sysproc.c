@@ -6,6 +6,9 @@
 #include "spinlock.h"
 #include "proc.h"
 
+extern void machinevec();
+extern void timervec();
+
 uint64
 sys_exit(void)
 {
@@ -88,4 +91,22 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_kbdints(void)
+{
+  return getconscnt();
+}
+
+uint64
+sys_time(void)
+{
+  printf("here");
+  asm volatile("ecall");
+  printf("here");
+
+  uint64 x;
+  asm volatile("addi %0, a0, 0" : "=r" (x) );
+  return x;
 }

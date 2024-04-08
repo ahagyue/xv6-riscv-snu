@@ -232,6 +232,15 @@ r_scause()
   return x;
 }
 
+// Machine Trap Cause
+static inline uint64
+r_mcause()
+{
+  uint64 x;
+  asm volatile("csrr %0, mcause" : "=r" (x) );
+  return x;
+}
+
 // Supervisor Trap Value
 static inline uint64
 r_stval()
