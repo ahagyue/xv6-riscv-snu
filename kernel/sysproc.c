@@ -102,9 +102,7 @@ sys_kbdints(void)
 uint64
 sys_time(void)
 {
-  printf("here");
   asm volatile("ecall");
-  printf("here");
 
   uint64 x;
   asm volatile("addi %0, a0, 0" : "=r" (x) );

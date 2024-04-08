@@ -102,15 +102,17 @@ timervec:
         csrr a1, mcause
         li a2, 9
         bne a1, a2, L0
+        
+        csrr a1, mepc
+        addi a1, a1, 4
+        csrw mepc, a1
 
         ld a3, 16(a0)
         ld a2, 8(a0)
         ld a1, 0(a0)
 
         csrrw a0, mscratch, a0
-        #mret
-        #call machinetrap
-        #rdtime a0
+        rdtime a0
         mret
 L0:
         # start.c has set up the memory that mscratch points to:
@@ -135,12 +137,5 @@ L0:
         ld a2, 8(a0)
         ld a1, 0(a0)
         csrrw a0, mscratch, a0
-
-        mret
-
-.global machinevec
-.align 4
-machinevec:
-        rdtime a0
 
         mret
