@@ -9,6 +9,9 @@
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
+struct rt_proc rt_proc[NPROC];
+int n_rt_proc;
+int recent_rtp;
 
 struct proc *initproc;
 
@@ -374,6 +377,15 @@ exit(int status)
   wakeup(p->parent);
   
   acquire(&p->lock);
+  
+  int flag = 0;
+  for(struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
+    if (rtp->proc->pid == p->pid) {
+      flag = 1;
+      n_rt_proc--;
+    }
+    if (flag) *rtp = *(rtp+1);
+  }
 
   p->xstate = status;
   p->state = ZOMBIE;
@@ -441,10 +453,13 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+extern uint ticks;
+extern uint64 sys_time(void);
 void
 scheduler(void)
 {
-  struct proc *p;
+  struct proc *p, *cp;
+  struct rt_proc *rtp;
   struct cpu *c = mycpu();
   
   c->proc = 0;
@@ -452,7 +467,47 @@ scheduler(void)
     // Avoid deadlock by ensuring that devices can interrupt.
     intr_on();
 
-    for(p = proc; p < &proc[NPROC]; p++) {
+    for(cp = proc; cp < &proc[NPROC]; cp++) {
+      int flag = 0;
+      for (rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
+        if (rtp->proc->pid == cp->pid) flag = 1;
+      }
+      if (flag) continue;
+      
+      //EDF
+      int deadline;
+      int min_deadline = 2147483647;
+      struct rt_proc *next = 0;
+
+      for(rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
+        if (ticks - rtp->start_tick - rtp->period == 0) {
+          rtp->start_tick = ticks;
+          rtp->finished = 0;
+        }
+
+        deadline = rtp->period + rtp->start_tick - ticks;
+
+        if (rtp->finished) continue;
+
+        if (deadline < min_deadline) {
+          min_deadline = deadline;
+          next = rtp;
+        } else if (deadline == min_deadline) {
+          // printf("curpid? %d\n", c->proc->pid);
+          if ((recent_rtp == rtp->proc->pid || rtp->proc->pid < next->proc->pid) && recent_rtp != next->proc->pid)
+            next = rtp;
+        }
+      }
+      if (next) {
+        recent_rtp = next->proc->pid;
+        // printf("tick: %d pid: %d finished: %d, deadline: %d period: %d start_tick: %d\n",ticks, next->proc->pid, next->finished, min_deadline, next->period, next->start_tick);
+        // printf("current cp: %d\n", cp->pid);
+        cp--;
+      }
+
+      p = next ? next->proc : cp;
+
+      // Round Robin
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
         // Switch to chosen process.  It is the process's job
@@ -467,6 +522,7 @@ scheduler(void)
         c->proc = 0;
       }
       release(&p->lock);
+
     }
   }
 }

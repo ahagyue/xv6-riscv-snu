@@ -105,3 +105,15 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+extern struct proc proc[NPROC];
+
+struct rt_proc {
+  struct proc *proc;
+  int runtime;
+  int period;
+  int start_tick;
+  int finished;
+};
+extern struct rt_proc rt_proc[NPROC];
+extern int n_rt_proc;
