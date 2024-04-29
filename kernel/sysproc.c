@@ -111,39 +111,37 @@ sys_sched_setattr(void)
   argint(2, &period);
 
   if (!pid) pid = myproc()->pid;
-  if (pid < 0 || runtime < 0 || period < 0 || runtime > period) return -1;
+  if (pid < 0 || runtime < 0 || period < 0 || runtime >= period) return -1;
   if (!runtime || !period) return 0;
 
   for (struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
     if (rtp->proc->pid == pid) return -1;
   }
 
-
   struct proc *p = 0;
   for(p = proc; p < &proc[NPROC]; p++) {
-    if (p->pid == pid) break;
+    if (p->pid == pid) {
+      acquire(&p->lock);
+      rt_proc[n_rt_proc++] = (struct rt_proc){p, runtime, period, ticks, 0};
+      release(&p->lock);
+      return 0;
+    }
   }
-  if (!p) return -1;
-
-  acquire(&p->lock);
-  rt_proc[n_rt_proc++] = (struct rt_proc){p, runtime, period, ticks, 0};
-  release(&p->lock);
-
-  return 0;
+  return -1;
 }
 
 uint64
 sys_sched_yield(void)
 {
   // printf("yield %d\n", myproc()->pid);
-  acquire(&myproc()->lock);
   for(struct rt_proc *rtp = rt_proc; rtp < rt_proc+n_rt_proc; rtp++) {
-    if (rtp->proc->pid == myproc()->pid) {
+    if (rtp->proc == myproc()) {
+      acquire(&myproc()->lock);
       rtp->finished = 1;
+      release(&myproc()->lock);
     }
     // printf("finished: %d\n", rtp->finished);
   }
-  release(&myproc()->lock);
   yield();
   return 0;
 }

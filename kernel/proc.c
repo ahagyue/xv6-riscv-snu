@@ -11,7 +11,8 @@ struct cpu cpus[NCPU];
 struct proc proc[NPROC];
 struct rt_proc rt_proc[NPROC];
 int n_rt_proc;
-int recent_rtp;
+int recent_rtp[2] = {-1, -1};
+int recent_proc = -1;
 
 struct proc *initproc;
 
@@ -468,9 +469,10 @@ scheduler(void)
     intr_on();
 
     for(cp = proc; cp < &proc[NPROC]; cp++) {
+      intr_off();
       int flag = 0;
       for (rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-        if (rtp->proc->pid == cp->pid) flag = 1;
+        if (rtp->proc->pid == cp->pid) {flag = 1; break;}
       }
       if (flag) continue;
       
@@ -480,31 +482,25 @@ scheduler(void)
       struct rt_proc *next = 0;
 
       for(rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-        if (ticks - rtp->start_tick - rtp->period == 0) {
-          rtp->start_tick = ticks;
-          rtp->finished = 0;
-        }
-
         deadline = rtp->period + rtp->start_tick - ticks;
-
-        if (rtp->finished) continue;
+        
+        if (rtp->finished || rtp->proc->state != RUNNABLE) continue;
+        // printf("tick: %d pid: %d finished: %d, start_tick: %d, state: %d\n",ticks, rtp->proc->pid, rtp->finished, rtp->start_tick, rtp->proc->state);
+        // printf("%d\n", recent_rtp[1]);
 
         if (deadline < min_deadline) {
           min_deadline = deadline;
           next = rtp;
         } else if (deadline == min_deadline) {
-          // printf("curpid? %d\n", c->proc->pid);
-          if ((recent_rtp == rtp->proc->pid || rtp->proc->pid < next->proc->pid) && recent_rtp != next->proc->pid)
+          if ((recent_proc == rtp->proc->pid || rtp->proc->pid < next->proc->pid) && recent_proc != next->proc->pid) {
             next = rtp;
+          }
         }
       }
-      if (next) {
-        recent_rtp = next->proc->pid;
-        // printf("tick: %d pid: %d finished: %d, deadline: %d period: %d start_tick: %d\n",ticks, next->proc->pid, next->finished, min_deadline, next->period, next->start_tick);
-        // printf("current cp: %d\n", cp->pid);
-        cp--;
-      }
+      intr_on();
 
+      if (next) cp--;
+      
       p = next ? next->proc : cp;
 
       // Round Robin
@@ -519,6 +515,7 @@ scheduler(void)
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
+        recent_proc = c->proc->pid;
         c->proc = 0;
       }
       release(&p->lock);
