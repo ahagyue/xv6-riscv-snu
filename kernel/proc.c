@@ -173,6 +173,15 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+  int flag = 0;
+  for(struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
+    if (rtp->proc->pid == p->pid) {
+      flag = 1;
+      n_rt_proc--;
+    }
+    if (flag) *rtp = *(rtp+1);
+  }
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -378,15 +387,6 @@ exit(int status)
   wakeup(p->parent);
   
   acquire(&p->lock);
-  
-  int flag = 0;
-  for(struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-    if (rtp->proc->pid == p->pid) {
-      flag = 1;
-      n_rt_proc--;
-    }
-    if (flag) *rtp = *(rtp+1);
-  }
 
   p->xstate = status;
   p->state = ZOMBIE;
@@ -499,7 +499,10 @@ scheduler(void)
       }
       intr_on();
 
-      if (next) cp--;
+      if (next) {
+        recent_proc = next->proc->pid;
+        cp--;
+      }
       
       p = next ? next->proc : cp;
 
@@ -515,7 +518,6 @@ scheduler(void)
 
         // Process is done running for now.
         // It should have changed its p->state before coming back.
-        recent_proc = c->proc->pid;
         c->proc = 0;
       }
       release(&p->lock);
