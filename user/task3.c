@@ -49,7 +49,6 @@ do_fork(int n)
     printf("%l %d starts\n", time()/100000, getpid());
     x += run_task(n);
     printf("%l %d ends\n", time()/100000, getpid());
-    sleep(2);
     sched_yield();
   }
   return x;
@@ -69,8 +68,8 @@ main(int argc, char *argv[])
       if ((pid3 = fork()))
       {
         sched_setattr(pid1, 1, 5);
-        sched_setattr(pid2, 1, 6);
-        sched_setattr(pid3, 1, 3);
+        sched_setattr(pid2, 1, 5);
+        sched_setattr(pid3, 1, 5);
         wait(0);
         wait(0);
         wait(0);

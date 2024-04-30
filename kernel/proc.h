@@ -92,6 +92,12 @@ struct proc {
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
 
+  //EDF
+  uint start_tick;
+  int period;
+  int runtime;
+  int finished;
+
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
 
@@ -107,13 +113,3 @@ struct proc {
 };
 
 extern struct proc proc[NPROC];
-
-struct rt_proc {
-  struct proc *proc;
-  int runtime;
-  int period;
-  int start_tick;
-  int finished;
-};
-extern struct rt_proc rt_proc[NPROC];
-extern int n_rt_proc;

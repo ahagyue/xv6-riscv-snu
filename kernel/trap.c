@@ -165,12 +165,6 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
-  for(struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-      if (ticks - rtp->start_tick - rtp->period == 0) {
-        rtp->start_tick = ticks;
-        rtp->finished = 0;
-      }
-  }
   wakeup(&ticks);
   release(&tickslock);
 }
