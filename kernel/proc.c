@@ -9,10 +9,7 @@
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
-struct rt_proc rt_proc[NPROC];
-int n_rt_proc;
-int recent_rtp[2] = {-1, -1};
-int recent_proc = -1;
+int recent_proc;
 
 struct proc *initproc;
 
@@ -59,6 +56,8 @@ procinit(void)
       initlock(&p->lock, "proc");
       p->state = UNUSED;
       p->kstack = KSTACK((int) (p - proc));
+      p->runtime = 0;
+      p->period = 0;
   }
 }
 
@@ -150,6 +149,9 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->runtime = 0;
+  p->period = 0;
+
   return p;
 }
 
@@ -173,15 +175,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-
-  int flag = 0;
-  for(struct rt_proc *rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-    if (rtp->proc->pid == p->pid) {
-      flag = 1;
-      n_rt_proc--;
-    }
-    if (flag) *rtp = *(rtp+1);
-  }
+  p->runtime = 0;
+  p->period = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -454,13 +449,10 @@ wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
-extern uint ticks;
-extern uint64 sys_time(void);
 void
 scheduler(void)
 {
   struct proc *p, *cp;
-  struct rt_proc *rtp;
   struct cpu *c = mycpu();
   
   c->proc = 0;
@@ -469,42 +461,37 @@ scheduler(void)
     intr_on();
 
     for(cp = proc; cp < &proc[NPROC]; cp++) {
-      intr_off();
-      int flag = 0;
-      for (rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-        if (rtp->proc->pid == cp->pid) {flag = 1; break;}
-      }
-      if (flag) continue;
-      
-      //EDF
-      int deadline;
-      int min_deadline = 2147483647;
-      struct rt_proc *next = 0;
+      if (cp->runtime) continue;
 
-      for(rtp = rt_proc; rtp < rt_proc + n_rt_proc; rtp++) {
-        deadline = rtp->period + rtp->start_tick - ticks;
-        
-        if (rtp->finished || rtp->proc->state != RUNNABLE) continue;
-        // printf("tick: %d pid: %d finished: %d, start_tick: %d, state: %d\n",ticks, rtp->proc->pid, rtp->finished, rtp->start_tick, rtp->proc->state);
-        // printf("%d\n", recent_rtp[1]);
-
-        if (deadline < min_deadline) {
-          min_deadline = deadline;
-          next = rtp;
-        } else if (deadline == min_deadline) {
-          if ((recent_proc == rtp->proc->pid || rtp->proc->pid < next->proc->pid) && recent_proc != next->proc->pid) {
+      struct proc *next = 0;
+      uint min_deadline = 4294967295;
+      for(struct proc *rtp = proc; rtp < &proc[NPROC]; rtp++) {
+        acquire(&rtp->lock);
+        if (rtp->runtime && rtp->state == RUNNABLE) {
+          uint deadline = rtp->period - (ticks - rtp->start_tick) % rtp->period;
+          
+          if (deadline < min_deadline) {
+            min_deadline = deadline;
             next = rtp;
           }
+          else if (deadline == min_deadline) {
+            // printf("%d %d %d\n", recent_proc, rtp->pid, next->pid);
+            if ((recent_proc == rtp->pid || rtp->pid < next->pid) && recent_proc != next->pid) {
+              next = rtp;
+            }
+          }
         }
+        release(&rtp->lock);
       }
-      intr_on();
 
       if (next) {
-        recent_proc = next->proc->pid;
+        if (!next->finished) recent_proc = next->pid;
+        // printf("nextpid: %d, finished: %d, recent_proc: %d\n", next->pid ,next->finished, recent_proc);
         cp--;
+      } else {
+        recent_proc = -1;
       }
-      
-      p = next ? next->proc : cp;
+      p = next ? next : cp;
 
       // Round Robin
       acquire(&p->lock);
