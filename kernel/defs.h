@@ -187,6 +187,9 @@ void            virtio_disk_intr(void);
 
 #ifdef SNU
 // ksm.c
+int get_count(pa_t pa);
+void set_count(pa_t pa, int cnt);
+void cow();
 #endif
 
 // number of elements in fixed-size array

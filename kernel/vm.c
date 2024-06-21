@@ -15,6 +15,11 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern pa_t zeropage; // zeropage in ksm.h
+extern uint64 zerohash; // hash value of zeropage
+extern uint8 merge_cnt[];
+extern uint64 xxh64(void*, unsigned int); // hash function
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -42,6 +47,24 @@ kvmmake(void)
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(kpgtbl, TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  // allocate zero page
+  pte_t *pte;
+  if ((pte = walk(kpgtbl, (uint64)zeropage, 1)) == 0)
+    panic("zeropage");
+
+  zeropage = (pa_t)kalloc();
+  memset(zeropage, 0, PGSIZE);
+  *pte = PA2PTE(zeropage) | PTE_V | PTE_R | PTE_U | ((uint64)1 << 58);
+  zerohash = xxh64(zeropage, PGSIZE);
+  // printf("zeropage pte: %p\n", *pte);
+  // printf("zeropage: %p, zerohash: %x, content: %d %d %d\n", zeropage, zerohash, zeropage[0], zeropage[511], zeropage[512]);
+
+  // memset merge count
+  memset(merge_cnt, 0x11, 4096 * 4);
+  set_count(zeropage, 0);
+  // printf("merge_cnt val: %d %d, boundary: %d", merge_cnt[0], merge_cnt[4096*4-1], merge_cnt[4096*4]);
+
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
@@ -184,8 +207,15 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
+      intr_on();
+      int cnt; 
       uint64 pa = PTE2PA(*pte);
-      kfree((void*)pa);
+      if ((cnt = get_count((pa_t)pa)) == 1)
+        kfree((void*)pa);
+      else if (cnt > 0) {
+        set_count((pa_t)pa, cnt - 1);
+      }
+      intr_off();
     }
     *pte = 0;
   }
