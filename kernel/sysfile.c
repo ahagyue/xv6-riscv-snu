@@ -508,14 +508,7 @@ sys_pipe(void)
 uint64
 sys_sync(void)
 {
-  // FILL HERE
-
-
-
-
-
-
-
-
+  sync();
+  return 0;
 }
 #endif

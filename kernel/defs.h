@@ -55,6 +55,7 @@ int             writei(struct inode*, int, uint64, uint, uint);
 void            itrunc(struct inode*);
 #ifdef SNU
 void            fsinfo(void);
+void            sync(void);
 #endif
 
 // ramdisk.c

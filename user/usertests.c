@@ -1167,6 +1167,7 @@ fourfiles(char *s)
 
     if(pid == 0){
       fd = open(fname, O_CREATE | O_RDWR);
+      printf("%d : %d\n", fd, pi);
       if(fd < 0){
         printf("create failed\n", s);
         exit(1);
@@ -1175,7 +1176,7 @@ fourfiles(char *s)
       memset(buf, '0'+pi, SZ);
       for(i = 0; i < N; i++){
         if((n = write(fd, buf, SZ)) != SZ){
-          printf("write failed %d\n", n);
+          printf("%d write failed %d\n", fd, n);
           exit(1);
         }
       }
@@ -3097,5 +3098,6 @@ main(int argc, char *argv[])
     exit(1);
   }
   printf("ALL TESTS PASSED\n");
+  sync();
   exit(0);
 }

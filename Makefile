@@ -2,7 +2,7 @@
 # Do not change the following PANUM
 PANUM = pa5
 # Please specify your student ID:
-STUDENTID =
+STUDENTID = 2020-17164
 
 _PANUM = $(strip $(PANUM))
 ifneq ($(_PANUM), pa5)
@@ -148,6 +148,8 @@ UPROGS=\
 	$U/_sh\
 	$U/_stressfs\
 	$U/_usertests\
+	$U/_usertest_sync\
+	$U/_sync_test\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\

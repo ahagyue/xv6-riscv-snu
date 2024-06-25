@@ -24,7 +24,9 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 // there should be one superblock per disk device, but we run with
 // only one device
-struct superblock sb; 
+struct superblock sb;
+int fat[FSSIZE];
+struct sleeplock fat_lock;
 
 // Read the super block.
 static void
@@ -37,12 +39,26 @@ readsb(int dev, struct superblock *sb)
   brelse(bp);
 }
 
+static void
+readfat(int dev)
+{
+  struct buf *bp = 0;
+
+  for(int i = 0; i < sb.nfat; i++) {
+    bp = bread(dev, i + sb.fatstart);
+    memmove((void*)fat + i * BSIZE, bp->data, min(BSIZE, FSSIZE * 4 - i * BSIZE));
+    brelse(bp);
+  }
+}
+
 // Init fs
 void
 fsinit(int dev) {
   readsb(dev, &sb);
-  if(sb.magic != FSMAGIC)
+  if(sb.magic != FSMAGIC_FATTY)
     panic("invalid file system");
+  readfat(dev);
+  initsleeplock(&fat_lock, "fat");
   initlog(dev, &sb);
 }
 
@@ -65,43 +81,33 @@ bzero(int dev, int bno)
 static uint
 balloc(uint dev)
 {
-  int b, bi, m;
-  struct buf *bp;
+  int free;
 
-  bp = 0;
-  for(b = 0; b < sb.size; b += BPB){
-    bp = bread(dev, BBLOCK(b, sb));
-    for(bi = 0; bi < BPB && b + bi < sb.size; bi++){
-      m = 1 << (bi % 8);
-      if((bp->data[bi/8] & m) == 0){  // Is block free?
-        bp->data[bi/8] |= m;  // Mark block in use.
-        log_write(bp);
-        brelse(bp);
-        bzero(dev, b + bi);
-        return b + bi;
-      }
-    }
-    brelse(bp);
+  acquiresleep(&fat_lock);
+  if (sb.freeblks) {
+    free = sb.freehead;
+    bzero(dev, free);
+    sb.freehead = fat[free];
+    fat[free] = 0;
+    sb.freeblks--;
+    releasesleep(&fat_lock);
+    return free;
+  } else {
+    printf("balloc: out of blocks\n");
+    releasesleep(&fat_lock);
+    return 0;
   }
-  printf("balloc: out of blocks\n");
-  return 0;
 }
 
 // Free a disk block.
 static void
 bfree(int dev, uint b)
 {
-  struct buf *bp;
-  int bi, m;
-
-  bp = bread(dev, BBLOCK(b, sb));
-  bi = b % BPB;
-  m = 1 << (bi % 8);
-  if((bp->data[bi/8] & m) == 0)
-    panic("freeing free block");
-  bp->data[bi/8] &= ~m;
-  log_write(bp);
-  brelse(bp);
+  acquiresleep(&fat_lock);
+  fat[b] = sb.freehead;
+  sb.freehead = b;
+  sb.freeblks++;
+  releasesleep(&fat_lock);
 }
 
 // Inodes.
@@ -235,7 +241,7 @@ iupdate(struct inode *ip)
   dip->minor = ip->minor;
   dip->nlink = ip->nlink;
   dip->size = ip->size;
-  memmove(dip->addrs, ip->addrs, sizeof(ip->addrs));
+  dip->startblk = ip->startblk;
   log_write(bp);
   brelse(bp);
 }
@@ -308,7 +314,7 @@ ilock(struct inode *ip)
     ip->minor = dip->minor;
     ip->nlink = dip->nlink;
     ip->size = dip->size;
-    memmove(ip->addrs, dip->addrs, sizeof(ip->addrs));
+    ip->startblk = dip->startblk;
     brelse(bp);
     ip->valid = 1;
     if(ip->type == 0)
@@ -382,39 +388,28 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  int i;
+  int blk = ip->startblk;
 
-  if(bn < NDIRECT){
-    if((addr = ip->addrs[bn]) == 0){
-      addr = balloc(ip->dev);
-      if(addr == 0)
-        return 0;
-      ip->addrs[bn] = addr;
-    }
-    return addr;
+  if (ip->startblk == 0) {
+    ip->startblk = balloc(ip->dev);
+    return ip->startblk;
   }
-  bn -= NDIRECT;
 
-  if(bn < NINDIRECT){
-    // Load indirect block, allocating if necessary.
-    if((addr = ip->addrs[NDIRECT]) == 0){
-      addr = balloc(ip->dev);
-      if(addr == 0)
-        return 0;
-      ip->addrs[NDIRECT] = addr;
-    }
-    bp = bread(ip->dev, addr);
-    a = (uint*)bp->data;
-    if((addr = a[bn]) == 0){
-      addr = balloc(ip->dev);
-      if(addr){
-        a[bn] = addr;
-        log_write(bp);
-      }
-    }
-    brelse(bp);
-    return addr;
+  acquiresleep(&fat_lock);
+  for(i = 0; i < bn; i++) {
+    if (fat[blk] == 0) break;
+    blk = fat[blk];
+  }
+  releasesleep(&fat_lock);
+
+  if (i == bn) return blk;
+  else {
+    int new_blk = balloc(ip->dev);
+    acquiresleep(&fat_lock);
+    fat[blk] = new_blk;
+    releasesleep(&fat_lock);
+    return new_blk;
   }
 
   panic("bmap: out of range");
@@ -425,29 +420,15 @@ bmap(struct inode *ip, uint bn)
 void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
-
-  for(i = 0; i < NDIRECT; i++){
-    if(ip->addrs[i]){
-      bfree(ip->dev, ip->addrs[i]);
-      ip->addrs[i] = 0;
-    }
+  int blk = ip->startblk, tmp;
+  while(blk) {
+    acquiresleep(&fat_lock);
+    tmp = fat[blk];
+    releasesleep(&fat_lock);
+    bfree(ip->dev, blk);
+    blk = tmp;
   }
-
-  if(ip->addrs[NDIRECT]){
-    bp = bread(ip->dev, ip->addrs[NDIRECT]);
-    a = (uint*)bp->data;
-    for(j = 0; j < NINDIRECT; j++){
-      if(a[j])
-        bfree(ip->dev, a[j]);
-    }
-    brelse(bp);
-    bfree(ip->dev, ip->addrs[NDIRECT]);
-    ip->addrs[NDIRECT] = 0;
-  }
-
+  ip->startblk = 0;
   ip->size = 0;
   iupdate(ip);
 }
@@ -474,10 +455,13 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
   uint tot, m;
   struct buf *bp;
 
+  // printf("%d %d %d\n", off, n, ip->size);
   if(off > ip->size || off + n < off)
     return 0;
   if(off + n > ip->size)
     n = ip->size - off;
+  
+  // printf("%d %d %d\n", off, n, ip->size);
 
   for(tot=0; tot<n; tot+=m, off+=m, dst+=m){
     uint addr = bmap(ip, off/BSIZE);
@@ -512,7 +496,7 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
     return -1;
   if(off + n > MAXFILE*BSIZE)
     return -1;
-
+  
   for(tot=0; tot<n; tot+=m, off+=m, src+=m){
     uint addr = bmap(ip, off/BSIZE);
     if(addr == 0)
@@ -534,7 +518,7 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
   // because the loop above might have called bmap() and added a new
   // block to ip->addrs[].
   iupdate(ip);
-
+  
   return tot;
 }
 
@@ -701,5 +685,23 @@ void
 fsinfo(void)
 {
   printf("Free blocks: %d\n", sb.freeblks);
+}
+
+void
+sync(void)
+{ 
+  // acquiresleep(&fat_lock);
+  struct buf *b = bread(ROOTDEV, 1);
+  memmove(b->data, &sb, sizeof(sb));
+  bwrite(b);
+  brelse(b);
+
+  for(int i = 0; i < sb.nfat; i++) {
+    b = bread(ROOTDEV, sb.fatstart + i);
+    memmove(b->data, (void*)fat + i * BSIZE, min(BSIZE, FSSIZE * 4 - i * BSIZE));
+    bwrite(b);
+    brelse(b);
+  }
+  // releasesleep(&fat_ lock);
 }
 #endif
